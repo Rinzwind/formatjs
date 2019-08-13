@@ -11,7 +11,7 @@ import {parse} from 'intl-messageformat-parser/dist';
 import {printAST} from 'intl-messageformat-parser/dist/printer';
 const {declare} = require('@babel/helper-plugin-utils') as any;
 const generate = require('@babel/generator')['default'];
-import { camelCase } from 'lodash';
+import {camelCase} from 'lodash';
 import {types as t, PluginObj} from '@babel/core';
 import {
   ObjectExpression,
@@ -310,12 +310,12 @@ function isI18nMessageCall(callee: NodePath<Expression>) {
   return (
     property.isIdentifier() &&
     property.node.name === 'i18n' &&
-      /* this.i18n(...) */
+    /* this.i18n(...) */
     (object.isThisExpression() ||
-    /* props.i18n(...) */
-    ((object.isIdentifier()) ||
-      /* this.props.i18n(...) */
-      (object.isMemberExpression())))
+      /* props.i18n(...) */
+      (object.isIdentifier() ||
+        /* this.props.i18n(...) */
+        object.isMemberExpression()))
   );
 }
 
@@ -641,15 +641,13 @@ export default declare((api: any) => {
         function warnAboutNonStringLiteralArgument(arg: NodePath) {
           const loc = arg.node.loc;
           let lineNr = '//';
-          if (loc)
-            lineNr = loc.start.line.toString();
+          if (loc) lineNr = loc.start.line.toString();
           const code = generate(path.node).code;
           console.warn(
             `WARNING i18n called with non-string literal in ${filename}: \n \tline ${lineNr} -- ${code}\n` +
-            ` ==> Use the @i18n:translations[option1, option2, ...] comment to pass all possible strings for this i18n call`
+              ` ==> Use the @i18n:translations[option1, option2, ...] comment to pass all possible strings for this i18n call`
           );
         }
-
 
         function processFirstArgumentOfCall() {
           const firstArgument: NodePath = path.get('arguments')[0];
@@ -662,7 +660,7 @@ export default declare((api: any) => {
             );
             if (translationsInComment.length > 0) {
               translationsInComment.forEach(translationMessage => {
-                storeMessageFromMessageString(translationMessage)
+                storeMessageFromMessageString(translationMessage);
               });
             } else {
               warnAboutNonStringLiteralArgument(firstArgument);
@@ -671,14 +669,14 @@ export default declare((api: any) => {
         }
 
         /* Search for calls to i18n:
-        *   i18n(args)
-        *   object.i18n(args)
-        *   this.object.i18n(args) */
+         *   i18n(args)
+         *   object.i18n(args)
+         *   this.object.i18n(args) */
         if (callee.isIdentifier() && callee.node.name === 'i18n') {
           processFirstArgumentOfCall();
         }
         if (isI18nMessageCall(callee)) {
-          processFirstArgumentOfCall()
+          processFirstArgumentOfCall();
         }
       },
     },
