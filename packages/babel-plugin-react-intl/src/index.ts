@@ -10,6 +10,8 @@ import {mkdirpSync} from 'fs-extra';
 import {parse} from 'intl-messageformat-parser/dist';
 import {printAST} from 'intl-messageformat-parser/dist/printer';
 const {declare} = require('@babel/helper-plugin-utils') as any;
+const generate = require('@babel/generator')['default'];
+import { camelCase } from 'lodash';
 import {types as t, PluginObj} from '@babel/core';
 import {
   ObjectExpression,
@@ -45,6 +47,7 @@ type MessageDescriptorPath = Record<
 >;
 
 export interface Opts {
+  filename: any;
   moduleSourceName?: string;
   enforceDefaultMessage?: boolean;
   enforceDescriptions?: boolean;
@@ -266,7 +269,6 @@ function storeMessage(
       ...path.node.loc,
     };
   }
-
   messages.set(id, {id, description, defaultMessage, ...loc});
 }
 
@@ -289,7 +291,6 @@ function isFormatMessageCall(callee: NodePath<Expression>) {
 
   const object = callee.get('object');
   const property = callee.get('property') as NodePath<Identifier>;
-
   return (
     property.isIdentifier() &&
     property.node.name === 'formatMessage' &&
@@ -298,6 +299,23 @@ function isFormatMessageCall(callee: NodePath<Expression>) {
       // things like `this.props.intl.formatMessage`
       (object.isMemberExpression() &&
         (object.get('property') as NodePath<Identifier>).node.name === 'intl'))
+  );
+}
+
+function isI18nMessageCall(callee: NodePath<Expression>) {
+  if (!callee.isMemberExpression()) return false;
+  const object = callee.get('object');
+  const property = callee.get('property') as NodePath<Identifier>;
+
+  return (
+    property.isIdentifier() &&
+    property.node.name === 'i18n' &&
+      /* this.i18n(...) */
+    (object.isThisExpression() ||
+    /* props.i18n(...) */
+    ((object.isIdentifier()) ||
+      /* this.props.i18n(...) */
+      (object.isMemberExpression())))
   );
 }
 
@@ -368,15 +386,12 @@ export default declare((api: any) => {
             );
           }
         }
-
         const messagesFilename = p.join(
           messagesDir,
           p.dirname(relativePath),
           basename + '.json'
         );
-
         const messagesFile = JSON.stringify(descriptors, null, 2);
-
         mkdirpSync(p.dirname(messagesFilename));
         writeFileSync(messagesFilename, messagesFile);
       }
@@ -578,6 +593,92 @@ export default declare((api: any) => {
           if (messageDescriptor.isObjectExpression()) {
             processMessageObject(messageDescriptor);
           }
+        }
+
+        function getTranslationsFromComments(node: t.CallExpression) {
+          const format = /i18n:translations\[(.*)]/;
+          const toTranslate: string[] = [];
+          let comments: string[] = [];
+          if (node.trailingComments)
+            node.trailingComments.forEach((comment: {value: string}) =>
+              comments.push(comment.value.trim())
+            );
+          if (node.leadingComments)
+            node.leadingComments.forEach((comment: {value: string}) =>
+              comments.push(comment.value.trim())
+            );
+          comments.forEach((comment: string) => {
+            if (format.test(comment)) {
+              try {
+                const match = comment.match(/\[(.*)\]/);
+                if (match) {
+                  match[1]
+                    .split(',')
+                    .forEach((translation: string) =>
+                      toTranslate.push(translation.trim())
+                    );
+                } else throw new Error('Wrong i18n:translation format');
+              } catch (e) {
+                console.warn(
+                  'WARNING i18n: could not parse translations in comment',
+                  comment
+                );
+              }
+            }
+          });
+
+          return toTranslate;
+        }
+
+        /* Auxiliary function that takes a string and stores it in the messages.
+           The id is generated automatically, based on the filename and the message. */
+        function storeMessageFromMessageString(defaultMessage: string) {
+          const basename = p.basename(filename, p.extname(filename));
+          const id = basename + '.' + camelCase(defaultMessage);
+          storeMessage({id, defaultMessage}, path, opts, filename, messages);
+        }
+
+        function warnAboutNonStringLiteralArgument(arg: NodePath) {
+          const loc = arg.node.loc;
+          let lineNr = '//';
+          if (loc)
+            lineNr = loc.start.line.toString();
+          const code = generate(path.node).code;
+          console.warn(
+            `WARNING i18n called with non-string literal in ${filename}: \n \tline ${lineNr} -- ${code}\n` +
+            ` ==> Use the @i18n:translations[option1, option2, ...] comment to pass all possible strings for this i18n call`
+          );
+        }
+
+
+        function processFirstArgumentOfCall() {
+          const firstArgument: NodePath = path.get('arguments')[0];
+          if (t.isStringLiteral(firstArgument.node))
+            storeMessageFromMessageString(firstArgument.node.value);
+          else {
+            /* Search for surrounding comment with i18n:translation[option1, option2] format */
+            const translationsInComment = getTranslationsFromComments(
+              path.node
+            );
+            if (translationsInComment.length > 0) {
+              translationsInComment.forEach(translationMessage => {
+                storeMessageFromMessageString(translationMessage)
+              });
+            } else {
+              warnAboutNonStringLiteralArgument(firstArgument);
+            }
+          }
+        }
+
+        /* Search for calls to i18n:
+        *   i18n(args)
+        *   object.i18n(args)
+        *   this.object.i18n(args) */
+        if (callee.isIdentifier() && callee.node.name === 'i18n') {
+          processFirstArgumentOfCall();
+        }
+        if (isI18nMessageCall(callee)) {
+          processFirstArgumentOfCall()
         }
       },
     },

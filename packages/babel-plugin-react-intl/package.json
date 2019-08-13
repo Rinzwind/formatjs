@@ -12,10 +12,13 @@
   "author": "Eric Ferraiuolo <edf@ericf.me>",
   "dependencies": {
     "@babel/core": "^7.4.5",
+    "@babel/generator": "^7.5.5",
     "@babel/helper-plugin-utils": "^7.0.0",
     "@types/babel__core": "^7.1.2",
+    "@types/lodash": "^4.14.136",
     "fs-extra": "^8.0.1",
-    "intl-messageformat-parser": "^3.0.7"
+    "intl-messageformat-parser": "^3.0.7",
+    "lodash": "^4.17.15"
   },
   "scripts": {
     "clean": "rimraf lib test/fixtures/**/actual.json",
