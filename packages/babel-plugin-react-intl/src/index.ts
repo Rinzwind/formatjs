@@ -23,6 +23,7 @@ import {
   ObjectProperty,
   SourceLocation,
   Expression,
+  CallExpression,
 } from '@babel/types';
 import {NodePath} from '@babel/traverse';
 
@@ -595,18 +596,44 @@ export default declare((api: any) => {
           }
         }
 
-        function getTranslationsFromComments(node: t.CallExpression) {
+        function getCommentsOnLine(nodePath: NodePath) {
+          let comments: string[] = [];
+          const node = nodePath.node;
+          let traversePath = nodePath;
+          const line = node.loc ? node.loc.start.line : false;
+          while (
+            traversePath &&
+            (traversePath.node.loc ? traversePath.node.loc.start.line : -1) ===
+              line
+          ) {
+            if (traversePath.node.trailingComments)
+              traversePath.node.trailingComments.forEach(
+                (comment: {value: string}) =>
+                  comments.push(comment.value.trim())
+              );
+            if (traversePath.node.leadingComments)
+              traversePath.node.leadingComments.forEach(
+                (comment: {value: string}) =>
+                  comments.push(comment.value.trim())
+              );
+            traversePath = traversePath.parentPath;
+          }
+          return comments;
+        }
+
+        function isI18nSuppressed(nodePath: NodePath) {
+          let comments: string[] = getCommentsOnLine(nodePath);
+          let suppressed = false;
+          comments.forEach((comment: string) => {
+            if (comment.includes('i18n:suppress')) suppressed = true;
+          });
+          return suppressed;
+        }
+
+        function getTranslationsFromComments(nodePath: NodePath) {
           const format = /i18n:translations\[(.*)]/;
           const toTranslate: string[] = [];
-          let comments: string[] = [];
-          if (node.trailingComments)
-            node.trailingComments.forEach((comment: {value: string}) =>
-              comments.push(comment.value.trim())
-            );
-          if (node.leadingComments)
-            node.leadingComments.forEach((comment: {value: string}) =>
-              comments.push(comment.value.trim())
-            );
+          let comments: string[] = getCommentsOnLine(nodePath);
           comments.forEach((comment: string) => {
             if (format.test(comment)) {
               try {
@@ -644,7 +671,7 @@ export default declare((api: any) => {
           if (loc) lineNr = loc.start.line.toString();
           const code = generate(path.node).code;
           console.warn(
-            `WARNING i18n called with non-string literal in ${filename}: \n \tline ${lineNr} -- ${code}\n` +
+            `\nWARNING i18n called with non-string literal in ${filename}: \n \tline ${lineNr} -- ${code}\n` +
               ` ==> Use the @i18n:translations[option1, option2, ...] comment to pass all possible strings for this i18n call`
           );
         }
@@ -655,14 +682,13 @@ export default declare((api: any) => {
             storeMessageFromMessageString(firstArgument.node.value);
           else {
             /* Search for surrounding comment with i18n:translation[option1, option2] format */
-            const translationsInComment = getTranslationsFromComments(
-              path.node
-            );
+            const translationsInComment = getTranslationsFromComments(path);
+            const isSuppressed = isI18nSuppressed(path);
             if (translationsInComment.length > 0) {
               translationsInComment.forEach(translationMessage => {
                 storeMessageFromMessageString(translationMessage);
               });
-            } else {
+            } else if (!isSuppressed) {
               warnAboutNonStringLiteralArgument(firstArgument);
             }
           }
