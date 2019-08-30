@@ -58,6 +58,8 @@ export interface Opts {
   removeDefaultMessage?: boolean;
   extractFromFormatMessageCall?: boolean;
   additionalComponentNames?: string[];
+  noFilenamePrefixForID?: boolean;
+  noCamelCaseID?: boolean;
 }
 
 // From https://github.com/babel/babel/blob/master/packages/babel-core/src/transformation/plugin-pass.js
@@ -661,7 +663,9 @@ export default declare((api: any) => {
            The id is generated automatically, based on the filename and the message. */
         function storeMessageFromMessageString(defaultMessage: string) {
           const basename = p.basename(filename, p.extname(filename));
-          const id = basename + '.' + camelCase(defaultMessage);
+          const id =
+            (opts.noFilenamePrefixForID ? '' : basename + '.') +
+            (opts.noCamelCaseID ? defaultMessage : camelCase(defaultMessage));
           storeMessage({id, defaultMessage}, path, opts, filename, messages);
         }
 
